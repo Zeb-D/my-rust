@@ -1,7 +1,8 @@
-use std::rc::Rc;
-
 #[cfg(test)]
 mod tests{
+
+    use std::rc::Rc;
+
     #[test]
     fn rc_test() {use std::rc::Rc;
         let rc_examples = "Rc examples".to_string();
