@@ -1,75 +1,76 @@
-use std::collections::HashMap;
+#[cfg(test)]
+mod tests {
 
-macro_rules! add1{
-    ($a :expr) => {$a};
-    ($a:expr, $b:expr) =>{$a+$b};
-    ($a:expr,$($b: tt)*) =>{
-        $a + add1!($($b)*)
-    }
-}
+    use std::collections::HashMap;
 
-macro_rules! make_public{
-    (
-        $(#[$meta: meta])*
-        $vis: vis struct $struct_name: ident{
-            $(
-                $field_vis: vis $field_name: ident: $field_type: ty
-            ),*$(,)*
+    macro_rules! add1{
+        ($a :expr) => {$a};
+        ($a:expr, $b:expr) =>{$a+$b};
+        ($a:expr,$($b: tt)*) =>{
+            $a + add1!($($b)*)
         }
-    ) => {
-            $(#[$meta])*
-            pub struct $struct_name{
+    }
+
+    macro_rules! make_public{
+        (
+            $(#[$meta: meta])*
+            $vis: vis struct $struct_name: ident{
                 $(
-                    pub $field_name: $field_type,
-                )*
+                    $field_vis: vis $field_name: ident: $field_type: ty
+                ),*$(,)*
             }
-    }
-}
-
-macro_rules! convert {
-    ($($x: tt)*) => {
-        ()
-    };
-}
-
-macro_rules! count {
-    ($($x: expr), *) => {
-        <[()]>::len(&[$(convert!($x)),*])
-    };
-}
-
-macro_rules! hash_map {
-    ($($key: expr => $value: expr),*$(,)?) => {
-        {
-            let __cap = count!($($key),*);
-            println!("cap {}",__cap);
-            let mut __map = HashMap::with_capacity(__cap);
-            $(
-                __map.insert($key,$value);
-            )*
-            __map
+        ) => {
+                $(#[$meta])*
+                pub struct $struct_name{
+                    $(
+                        pub $field_name: $field_type,
+                    )*
+                }
         }
-    };
-}
+    }
 
-make_public!(
+    macro_rules! convert {
+        ($($x: tt)*) => {
+            ()
+        };
+    }
+
+    macro_rules! count {
+        ($($x: expr), *) => {
+            <[()]>::len(&[$(convert!($x)),*])
+        };
+    }
+
+    macro_rules! hash_map {
+        ($($key: expr => $value: expr),*$(,)?) => {
+            {
+                let __cap = count!($($key),*);
+                println!("cap {}",__cap);
+                let mut __map = HashMap::with_capacity(__cap);
+                $(
+                    __map.insert($key,$value);
+                )*
+                __map
+            }
+        };
+    }
+
+    make_public!(
+        #[derive(Debug)]
+        pub struct Test{
+            a: i64,
+            pub b: bool,
+        }
+    );
+
+    //上面的等价于这种方式
     #[derive(Debug)]
-    pub struct Test{
+    struct TestB{
         a: i64,
         pub b: bool,
     }
-);
-
-//上面的等价于这种方式
-#[derive(Debug)]
-struct TestB{
-    a: i64,
-    pub b: bool,
-}
 
 
-#[cfg(test)]
-mod tests {
     #[test]
     fn hello() {
         println!("Cargo, Hello, world!");
@@ -112,7 +113,7 @@ mod tests {
         println!("{:?}",convert!(t));
         println!("{}",count!(t));
     }
-    
+
 }
 
 // fn main() {
