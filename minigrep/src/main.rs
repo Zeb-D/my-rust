@@ -15,3 +15,6 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+https://vd9rjmh8z49uq28pcdmn.wgetcloud.online/link/ku4aLYMFFfOQbN3?target=clash
+
+https://wgetcloud.ltd/clients/Clash-Mac.dmg
