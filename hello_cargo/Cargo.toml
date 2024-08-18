@@ -7,6 +7,18 @@ edition = "2021"
 
 [dependencies]
 garden = "0.1.0"
+sh = "0.2.1"
+ascent = "*"
+socketioxide = "*"
+axum = "*"
+tokio = { version = "*", features = ["rt-multi-thread"] }
+message-io = { version = "0.18", default-features = false, features = ["tcp", "udp", "websocket"] }
+serde_json = "1.0.115"
+serde = "1.0.197"
+chrono = "0.4.37"
+lazy_static = "1.4.0"
+rayon = "1.5.1"
+
 
 # standard crate data is left out
 [dev-dependencies]
