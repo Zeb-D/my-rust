@@ -18,6 +18,8 @@ serde = "1.0.197"
 chrono = "0.4.37"
 lazy_static = "1.4.0"
 rayon = "1.5.1"
+indicatif = "0.17.9"
+colored="2.1.0"
 
 
 # standard crate data is left out
