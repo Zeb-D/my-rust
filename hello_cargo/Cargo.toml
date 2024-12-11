@@ -20,6 +20,7 @@ lazy_static = "1.4.0"
 rayon = "1.5.1"
 indicatif = "0.17.9"
 colored="2.1.0"
+regex="1.11.1"
 
 
 # standard crate data is left out
