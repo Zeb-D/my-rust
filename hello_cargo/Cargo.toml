@@ -24,9 +24,10 @@ regex="1.11.1"
 reqwest="0.12.9"
 futures="0.3.31"
 mio="1.0.3"
-hyper="1.5.1"
 bytes = "1.2"
-
+hyper = { version = "1", features = ["full"] }
+http-body-util = "0.1"
+hyper-util = { version = "0.1", features = ["full"] }
 
 # standard crate data is left out
 [dev-dependencies]
