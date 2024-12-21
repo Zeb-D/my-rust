@@ -20,3 +20,5 @@ main
 /.vscode/
 vscode
 .DS_Store
+hf_hub
+Cargo.lock
