@@ -1,0 +1,14 @@
+[package]
+name = "criterion_bench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lazy_static = "1.4.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "my_benchmark"  # Name according to whatever you want
+harness = false
