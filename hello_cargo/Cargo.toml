@@ -30,7 +30,8 @@ hyper = { version = "1.5.2", features = ["full"] }
 http-body-util = "0.1.2"
 hyper-util = { version = "0.1.10", features = ["full"] }
 actix-web = "4.0.0"
-polars = "0.45.1"
+polars = { version = "0.45.1", features = ["lazy", "round_series"] }
+
 
 # standard crate data is left out
 [dev-dependencies]
