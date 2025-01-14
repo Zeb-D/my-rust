@@ -232,8 +232,12 @@ mod tests {
             .clone()
             .lazy()
             .filter(
-                col("type").gt(10001).or(col("warehouse_id")
-                    .is_in(lit(Series::new("".into(), &[6567548941112i64, 6549184383297i64])))),
+                col("type")
+                    .gt(10001)
+                    .or(col("warehouse_id").is_in(lit(Series::new(
+                        "".into(),
+                        &[6567548941112i64, 6549184383297i64],
+                    )))),
             )
             .select([
                 col("warehouse_id"),
@@ -246,5 +250,42 @@ mod tests {
             .agg([len(), col("cnt").sum(), col("cnt2").sum()])
             .collect();
         println!("{:?}", df_small);
+    }
+
+    // https://docs.pola.rs/user-guide/concepts/expressions-and-contexts/#select
+    #[test]
+    fn test_expressions() {
+        let df: DataFrame = df!(
+            "name" => ["Alice Archer", "Ben Brown", "Chloe Cooper", "Daniel Donovan"],
+            "birthdate" => [
+                NaiveDate::from_ymd_opt(1997, 1, 10).unwrap(),
+                NaiveDate::from_ymd_opt(1985, 2, 15).unwrap(),
+                NaiveDate::from_ymd_opt(1983, 3, 22).unwrap(),
+                NaiveDate::from_ymd_opt(1981, 4, 30).unwrap(),
+            ],
+            "weight" => [57.9, 72.5, 53.6, 83.1],  // (kg)
+            "height" => [1.56, 1.77, 1.65, 1.75],  // (m)
+        )
+        .unwrap();
+        println!("{}", df);
+
+        let bmi = col("weight") / col("height").pow(2);
+        let result = df
+            .clone()
+            .lazy()
+            .select([
+                bmi.clone().alias("bmi"),
+                bmi.clone().mean().alias("avg_bmi"),
+                lit(25).alias("ideal_max_bmi"),
+            ])
+            .collect();
+        println!("{}", result.unwrap());
+
+        let result = df
+            .clone()
+            .lazy()
+            .select([((bmi.clone() - bmi.clone().mean()) / bmi.clone().std(1)).alias("deviation")])
+            .collect().unwrap();
+        println!("{}", result);
     }
 }
