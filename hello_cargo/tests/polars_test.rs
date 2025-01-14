@@ -36,7 +36,7 @@ mod tests {
         use polars::df;
         use polars::prelude::*;
         // use macro
-        let mut df: DataFrame = df!(
+        let df: DataFrame = df!(
             "name" => ["Alice Archer", "Ben Brown", "Chloe Cooper", "Daniel Donovan"],
             "birthdate" => [
                 NaiveDate::from_ymd_opt(1997, 1, 10).unwrap(),
@@ -75,8 +75,8 @@ mod tests {
         .unwrap();
         println!("{}", df);
 
-        let fileName = "polars_data_test.csv";
-        let mut file = File::create(fileName).expect("could not create file");
+        let file_name = "polars_data_test.csv";
+        let mut file = File::create(file_name).expect("could not create file");
         CsvWriter::new(&mut file)
             .include_header(true)
             .with_separator(b',')
@@ -85,7 +85,7 @@ mod tests {
             .with_infer_schema_length(None)
             .with_has_header(true)
             .with_parse_options(CsvParseOptions::default().with_try_parse_dates(true))
-            .try_into_reader_with_file_path(Some(fileName.into()))?
+            .try_into_reader_with_file_path(Some(file_name.into()))?
             .finish()?;
         println!("{}", df_csv);
 
@@ -113,28 +113,138 @@ mod tests {
             .collect()?;
         println!("{}", result);
 
+        let result = df
+            .clone()
+            .lazy()
+            .filter(col("birthdate").dt().year().lt(lit(1990)))
+            .collect()?;
+        println!("{}", result);
+
+        // Use `group_by_stable` if you want the Python behaviour of `maintain_order=True`.
+        let result = df
+            .clone()
+            .lazy()
+            .group_by([(col("birthdate").dt().year() / lit(10) * lit(10)).alias("decade")])
+            .agg([len()])
+            .collect()?;
+        println!("{}", result);
+
+        let result = df
+            .clone()
+            .lazy()
+            .group_by([(col("birthdate").dt().year() / lit(10) * lit(10)).alias("decade")])
+            .agg([
+                len().alias("sample_size"),
+                col("weight").mean().round(2).alias("avg_weight"),
+                col("height").max().alias("tallest"),
+            ])
+            .collect()?;
+        println!("{}", result);
+
+        let result = df
+            .clone()
+            .lazy()
+            .with_columns([
+                (col("birthdate").dt().year() / lit(10) * lit(10)).alias("decade"),
+                col("name").str().split(lit(" ")).list().first(),
+            ])
+            .select([all().exclude(["birthdate"])])
+            .group_by([col("decade")])
+            .agg([
+                col("name"),
+                cols(["weight", "height"])
+                    .mean()
+                    .round(2)
+                    .name()
+                    .prefix("avg_"),
+            ])
+            .collect()?;
+        println!("{}", result);
+
+        let df2: DataFrame = df!(
+            "name" => ["Ben Brown", "Daniel Donovan", "Alice Archer", "Chloe Cooper"],
+            "parent" => [true, false, false, false],
+            "siblings" => [1, 2, 3, 4],
+        )
+        .unwrap();
+
+        let result = df
+            .clone()
+            .lazy()
+            .join(
+                df2.clone().lazy(),
+                [col("name")],
+                [col("name")],
+                JoinArgs::new(JoinType::Left),
+            )
+            .collect()?;
+
+        println!("{}", result);
+
+        let df3: DataFrame = df!(
+            "name" => ["Ethan Edwards", "Fiona Foster", "Grace Gibson", "Henry Harris"],
+            "birthdate" => [
+                NaiveDate::from_ymd_opt(1977, 5, 10).unwrap(),
+                NaiveDate::from_ymd_opt(1975, 6, 23).unwrap(),
+                NaiveDate::from_ymd_opt(1973, 7, 22).unwrap(),
+                NaiveDate::from_ymd_opt(1971, 8, 3).unwrap(),
+            ],
+            "weight" => [67.9, 72.5, 57.6, 93.1],  // (kg)
+            "height" => [1.76, 1.6, 1.66, 1.8],  // (m)
+        )
+        .unwrap();
+
+        let result = concat(
+            [df.clone().lazy(), df3.clone().lazy()],
+            UnionArgs::default(),
+        )?
+        .collect()?;
+        println!("{}", result);
+
+        // use polars_ops::series::*;
+        let result = df
+            .clone()
+            .lazy()
+            .filter(
+                col("birthdate")
+                    .is_between(
+                        lit(NaiveDate::from_ymd_opt(1982, 12, 31).unwrap()),
+                        lit(NaiveDate::from_ymd_opt(1996, 1, 1).unwrap()),
+                        ClosedInterval::Both,
+                    )
+                    .and(col("height").gt(lit(1.7))),
+            )
+            .collect()?;
+        println!("{}", result);
+
         Ok(())
     }
 
-    // fn data_frame() -> Result<(),()> {
-    //     // 创建包含日期和温度的简单DataFrame
-    //     let dates = vec!["2021-01-01", "2021-01-02", "2021-01-03"];
-    //     let temperatures = vec![23, 25, 22];
-    //
-    //     let date_series = Series::new("date", dates);
-    //     let temp_series = Series::new("temperature", temperatures);
-    //
-    //     let df = DataFrame::new(vec![date_series, temp_series])?;
-    //     println!("{:?}", df);
-    //
-    //     // 筛选温度大于23的行
-    //     let filtered = df.filter(&df["temperature"].gt(23)?)?;
-    //     println!("{:?}", filtered);
-    //
-    //     // 按温度降序排序
-    //     let sorted = df.sort("temperature", false)?;
-    //     println!("{:?}", sorted);
-    //
-    //     Ok(())
-    // }
+    #[test]
+    fn test_reader() {
+        let df = CsvReadOptions::default()
+            .try_into_reader_with_file_path(Some("test_data.csv".into()))
+            .unwrap()
+            .finish()
+            .unwrap();
+        println!("{}", df.head(Some(10)));
+        let df_small = df
+            .clone()
+            .lazy()
+            .filter(
+                col("type").gt(10001).or(col("warehouse_id")
+                    .is_in(lit(Series::new("".into(), &[6567548941112i64, 6549184383297i64])))),
+            )
+            .select([
+                col("warehouse_id"),
+                col("product_id"),
+                col("type"),
+                col("cnt"),
+                col("cnt2"),
+            ])
+            .group_by([col("type")])
+            .agg([len(), col("cnt").sum(), col("cnt2").sum()])
+            .collect();
+        println!("{:?}", df_small);
+    }
 }
