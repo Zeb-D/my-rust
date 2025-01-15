@@ -285,7 +285,140 @@ mod tests {
             .clone()
             .lazy()
             .select([((bmi.clone() - bmi.clone().mean()) / bmi.clone().std(1)).alias("deviation")])
-            .collect().unwrap();
+            .collect()
+            .unwrap();
+        println!("{}", result);
+
+        let result = df
+            .clone()
+            .lazy()
+            .with_columns([
+                bmi.clone().alias("bmi"),
+                bmi.clone().mean().alias("avg_bmi"),
+                lit(25).alias("ideal_max_bmi"),
+            ])
+            .collect()
+            .unwrap();
+        println!("{}", result);
+
+        let result = df
+            .clone()
+            .lazy()
+            .filter(
+                col("birthdate")
+                    .is_between(
+                        lit(NaiveDate::from_ymd_opt(1982, 12, 31).unwrap()),
+                        lit(NaiveDate::from_ymd_opt(1996, 1, 1).unwrap()),
+                        ClosedInterval::Both,
+                    )
+                    .and(col("height").gt(lit(1.7))),
+            )
+            .collect()
+            .unwrap();
+        println!("{}", result);
+
+        let result = df
+            .clone()
+            .lazy()
+            .group_by([(col("birthdate").dt().year() / lit(10) * lit(10)).alias("decade")])
+            .agg([col("name"), col("height").sum(), col("weight").mean()])
+            .collect()
+            .unwrap();
+        println!("{}", result);
+
+        let result = df
+            .clone()
+            .lazy()
+            .group_by([
+                (col("birthdate").dt().year() / lit(10) * lit(10)).alias("decade"),
+                (col("height").lt(lit(1.7)).alias("short?")),
+            ])
+            .agg([
+                len(),
+                col("height").max().alias("tallest"),
+                cols(["weight", "height"]).mean().name().prefix("avg_"),
+                (dtype_col(&DataType::Float64) * lit(1.1))
+                    .name()
+                    .suffix("*1.1"),
+            ])
+            .collect()
+            .unwrap();
+        println!("{}", result);
+    }
+
+    // https://docs.pola.rs/user-guide/expressions/basic-operations/
+    #[test]
+    fn test_basic_operations() {
+        use polars::prelude::*;
+
+        let df = df! (
+            "nrs" => &[Some(1), Some(2), Some(3), None, Some(5)],
+            "names" => &["foo", "ham", "spam", "egg", "spam"],
+            "random" => &[0.37454, 0.950714, 0.731994, 0.598658, 0.156019],
+            "groups" => &["A", "A", "B", "A", "B"],
+        )
+        .unwrap();
+        println!("{}", &df);
+
+        let result = df
+            .clone()
+            .lazy()
+            .select([
+                col("nrs"),
+                col("random"),
+                (col("nrs") + lit(5)).alias("nrs + 5"),
+                (col("nrs") * col("random")).alias("nrs * random"),
+                (col("nrs") / col("random")).alias("nrs / random"),
+                (col("nrs").pow(lit(2))).alias("nrs ** 2"),
+                (col("nrs") % lit(3)).alias("nrs % 3"),
+                col("nrs").gt(1).alias("nrs > 1"),
+                col("nrs").gt_eq(3).alias("nrs >= 3"),
+                col("random").lt_eq(0.2).alias("random < .2"),
+                col("nrs").neq(1).alias("nrs != 1"),
+                col("nrs").eq(1).alias("nrs == 1"),
+                ((col("nrs").is_null()).not().and(col("groups").eq(lit("A"))))
+                    .alias("number not null and group A"),
+                (col("random").lt(lit(0.5)).or(col("groups").eq(lit("B"))))
+                    .alias("random < 0.5 or group B"),
+            ])
+            .collect()
+            .unwrap();
+        println!("{}", result);
+
+        let result = df
+            .clone()
+            .lazy()
+            .select([
+                col("names")
+                    .value_counts(false, false, "count", false)
+                    .alias("value_counts"),
+                col("names").unique_stable().alias("unique"),
+                col("names").unique_counts().alias("unique_counts"),
+            ])
+            .collect()
+            .unwrap();
+        println!("{}", result);
+
+        use rand::distributions::{Distribution, Uniform};
+        use rand::thread_rng;
+
+        let mut rng = thread_rng();
+        let between = Uniform::new_inclusive(0, 100_000);
+        let arr: Vec<u32> = between.sample_iter(&mut rng).take(100_100).collect();
+        let long_df = df!(
+            "numbers" => &arr
+        )
+        .unwrap();
+        let result = long_df
+            .clone()
+            .lazy()
+            .select([
+                col("numbers"),
+                col("numbers").n_unique().alias("n_unique"),
+                col("numbers").approx_n_unique().alias("approx_n_unique"),
+            ])
+            .collect()
+            .unwrap();
         println!("{}", result);
     }
 }
