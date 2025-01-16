@@ -1,5 +1,5 @@
 [package]
-name = "criterion_bench"
+name = "criterion_bench" #https://bheisler.github.io/criterion.rs/book/criterion_rs.html
 version = "0.1.0"
 edition = "2021"
 
