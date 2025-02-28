@@ -32,6 +32,7 @@ hyper-util = { version = "0.1.10", features = ["full"] }
 actix-web = "4.0.0"
 polars = { version = "0.45.1", features = ["lazy", "round_series", "strings", "diagonal_concat", "polars-ops", "is_between", "is_in", "approx_unique", "dtype-struct", "unique_counts"] }
 rand = "0.8.5"
+libc = "0.2.169"
 
 
 # standard crate data is left out
