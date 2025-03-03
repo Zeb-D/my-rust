@@ -1,29 +1,65 @@
-use axum::routing::get;
-use socketioxide::{extract::SocketRef, SocketIo};
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use tokio::time::{sleep, Duration};
+
+struct CancellableFuture<F> {
+    inner: F,
+    cancelled: Arc<Mutex<bool>>, // 使用 Arc<Mutex> 实现线程安全的取消标志
+}
+
+impl<F: Future> CancellableFuture<F> {
+    fn new(future: F) -> Self {
+        CancellableFuture {
+            inner: future,
+            cancelled: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    fn cancel(&self) {
+        let mut cancelled = self.cancelled.lock().unwrap();
+        *cancelled = true;
+    }
+}
+
+impl<F: Future> Future for CancellableFuture<F> {
+    type Output = Option<F::Output>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // 检查是否已取消
+        if *self.cancelled.lock().unwrap() {
+            return Poll::Ready(None);
+        }
+
+        // 安全地轮询内部 Future
+        match unsafe { self.as_mut().map_unchecked_mut(|this| &mut this.inner) }.poll(cx) {
+            Poll::Ready(output) => Poll::Ready(Some(output)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (layer, io) = SocketIo::builder()
-        .max_payload(10_000_000) // Max HTTP payload size of 10M
-        .max_buffer_size(10_000) // Max number of packets in the buffer
-        .build_layer();
-    
-    // Register a handler for the default namespace
-    io.ns("/", |s: SocketRef| {
-        // For each "message" event received, send a "message-back" event with the "Hello World!" event
-        s.on("message", |s: SocketRef| {
-            s.emit("message-back", "Hello World!").ok();
-        });
+async fn main() {
+    let future = CancellableFuture::new(async {
+        sleep(Duration::from_secs(5)).await;
+        println!("Task completed!");
+        42
     });
 
-    let app = axum::Router::new()
-        .route("/", get(|| async { "Hello, World!" }))
-        .layer(layer);
+    let cancelled = Arc::clone(&future.cancelled); // 克隆 Arc 用于取消操作
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:30000")
-        .await
-        .unwrap();
-    axum::serve(listener, app).await.unwrap();
+    tokio::spawn(async move {
+        sleep(Duration::from_secs(1)).await;
+        let mut cancelled = cancelled.lock().unwrap();
+        *cancelled = true;
+        println!("Task cancelled!");
+    });
 
-    Ok(())
+    if let Some(result) = future.await {
+        println!("Got result: {}", result);
+    } else {
+        println!("Task was cancelled");
+    }
 }
