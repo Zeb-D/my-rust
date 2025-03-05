@@ -14,6 +14,7 @@ mod tests {
     use std::future::Future;
     use std::ops::Sub;
     use std::pin::Pin;
+    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use tokio::time::{sleep, Duration};
@@ -428,5 +429,55 @@ mod tests {
             "Task should be err (cancelled), but it was: {:?}",
             result
         );
+    }
+
+    #[tokio::test]
+    async fn test_managed_resource_cleanup_future() {
+        // 在任务取消时，需要确保所有资源都被正确清理。
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use tokio::sync::{oneshot, Mutex};
+
+        struct ManagedResource {
+            data: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+            cleanup_tx: Option<oneshot::Sender<()>>,
+        }
+
+        impl ManagedResource {
+            async fn new() -> Self {
+                let (cleanup_tx, cleanup_rx) = oneshot::channel();
+                let data = Arc::new(Mutex::new(HashMap::new()));
+
+                let cleanup_data = data.clone();
+                tokio::spawn(async move {
+                    tokio::select! {
+                    _ = cleanup_rx => {
+                    // 执行清理操作
+                    cleanup_data.lock().await.clear();
+                    println!("Resource cleaned up");
+                    }
+                    }
+                });
+
+                ManagedResource {
+                    data,
+                    cleanup_tx: Some(cleanup_tx),
+                }
+            }
+            async fn cleanup(mut self) {
+                if let Some(tx) = self.cleanup_tx.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+
+        impl Drop for ManagedResource {
+            fn drop(&mut self) {
+                if let Some(tx) = self.cleanup_tx.take() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+
     }
 }
