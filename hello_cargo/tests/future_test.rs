@@ -433,51 +433,195 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_resource_cleanup_future() {
-        // 在任务取消时，需要确保所有资源都被正确清理。
         use std::collections::HashMap;
         use std::sync::Arc;
         use tokio::sync::{oneshot, Mutex};
+        use tokio::time::{sleep, Duration};
 
         struct ManagedResource {
             data: Arc<Mutex<HashMap<String, Vec<u8>>>>,
             cleanup_tx: Option<oneshot::Sender<()>>,
+            cleaned: Arc<Mutex<bool>>, // 额外标志位，确保清理后可验证
         }
 
         impl ManagedResource {
             async fn new() -> Self {
                 let (cleanup_tx, cleanup_rx) = oneshot::channel();
                 let data = Arc::new(Mutex::new(HashMap::new()));
+                let cleaned = Arc::new(Mutex::new(false));
 
-                let cleanup_data = data.clone();
+                let cleanup_data = Arc::clone(&data);
+                let cleanup_flag = Arc::clone(&cleaned);
+
                 tokio::spawn(async move {
                     tokio::select! {
-                    _ = cleanup_rx => {
-                    // 执行清理操作
-                    cleanup_data.lock().await.clear();
-                    println!("Resource cleaned up");
-                    }
+                        _ = cleanup_rx => {
+                            // 执行清理操作
+                            cleanup_data.lock().await.clear();
+                            *cleanup_flag.lock().await = true;
+                            println!("Resource cleaned up");
+                        }
                     }
                 });
 
                 ManagedResource {
                     data,
                     cleanup_tx: Some(cleanup_tx),
+                    cleaned,
                 }
             }
-            async fn cleanup(mut self) {
+
+            /// ✅ **改为 `&mut self`，避免移动 `self`**
+            async fn cleanup(&mut self) {
                 if let Some(tx) = self.cleanup_tx.take() {
                     let _ = tx.send(());
+                    println!("cleanup done");
                 }
             }
+            /// ✅ **新增：检查资源是否被清理**
+            async fn is_cleaned_up(&self) -> bool {
+                *self.cleaned.lock().await
+            }
         }
-
         impl Drop for ManagedResource {
             fn drop(&mut self) {
                 if let Some(tx) = self.cleanup_tx.take() {
                     let _ = tx.send(());
+                    println!("cleanup Drop");
                 }
             }
         }
 
+        // **🔹 CASE 1: 手动清理数据**
+        async fn test_cleanup_manual() {
+            let mut resource = ManagedResource::new().await;
+
+            // ✅ **添加数据**
+            {
+                let mut data = resource.data.lock().await;
+                data.insert("key".to_string(), vec![1, 2, 3]);
+            }
+
+            // ✅ **手动触发清理**
+            resource.cleanup().await;
+            sleep(Duration::from_millis(50)).await; // 等待清理完成
+
+            // ✅ **检查数据是否被清空**
+            let data = resource.data.lock().await;
+            assert!(data.is_empty(), "手动 cleanup() 之后，数据应该被清空！");
+            assert!(resource.is_cleaned_up().await, "标志位应为 true！");
+            println!("✅ test_cleanup_manual 通过！");
+        }
+
+        // **🔹 CASE 2: 依赖 Drop 自动清理**
+        async fn test_cleanup_on_drop() {
+            let resource = ManagedResource::new().await;
+
+            // ✅ **添加数据**
+            {
+                let mut data = resource.data.lock().await;
+                data.insert("key".to_string(), vec![4, 5, 6]);
+            }
+
+            // ✅ **不手动调用 cleanup()，直接 drop**
+            drop(resource);
+            sleep(Duration::from_millis(50)).await; // 等待 Drop 触发清理
+
+            println!("✅ test_cleanup_on_drop 通过！");
+        }
+
+        // **运行测试**
+        test_cleanup_manual().await;
+        test_cleanup_on_drop().await;
+    }
+
+    #[tokio::test]
+    async fn test_traced_future() {
+        // 使用结构化日志来追踪异步任务的生命周期
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
+        use tokio::time::{sleep, Duration};
+        use tracing::{info, instrument, Level};
+        use tracing_subscriber;
+        use uuid::Uuid;
+
+        #[derive(Debug, Clone)]
+        struct TaskId(Uuid);
+
+        struct TracedFuture<F> {
+            inner: Pin<Box<F>>, // 修复：Future 需要放入 `Pin<Box<F>>`
+            task_id: TaskId,
+        }
+
+        impl<F: Future> TracedFuture<F> {
+            fn new(future: F) -> Self {
+                TracedFuture {
+                    inner: Box::pin(future), // 修复：用 `Box::pin` 确保 `inner` 被固定
+                    task_id: TaskId(Uuid::new_v4()),
+                }
+            }
+        }
+
+        impl<F: Future> Future for TracedFuture<F> {
+            type Output = F::Output;
+            #[instrument(skip(self, cx), fields(task_id = ?self.task_id.0))]
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                info!("Polling task");
+                let inner = self.get_mut(); // `get_mut()` 获取 `&mut Self`
+                let future = inner.inner.as_mut(); // `as_mut()` 获取 `Pin<&mut F>`
+
+                match future.poll(cx) {
+                    Poll::Ready(output) => {
+                        info!("Task completed");
+                        Poll::Ready(output)
+                    }
+                    Poll::Pending => {
+                        info!("Task pending");
+                        Poll::Pending
+                    }
+                }
+            }
+        }
+
+        // 初始化 tracing 日志（仅初始化一次）
+        tracing_subscriber::fmt::init(); // 初始化日志
+
+        async fn sample_task() -> &'static str {
+            println!("Sample task");
+            sleep(Duration::from_millis(100)).await;
+            "Task Done"
+        }
+
+        // **🔹 测试 1：任务是否能完成**
+        let traced = TracedFuture::new(sample_task());
+        let result = traced.await;
+        assert_eq!(result, "Task Done");
+        println!("✅ 测试 1 通过：任务成功完成");
+
+        // **🔹 测试 2：任务挂起后是否能恢复执行**
+        async fn pending_task() -> &'static str {
+            sleep(Duration::from_millis(50)).await;
+            sleep(Duration::from_millis(50)).await;
+            "Resumed Task"
+        }
+
+        let traced = TracedFuture::new(pending_task());
+        let result = traced.await;
+        assert_eq!(result, "Resumed Task");
+        println!("✅ 测试 2 通过：任务挂起后恢复执行");
     }
 }
+
+// 通过本文的深入探讨，我们可以总结出以下关键最佳实践：
+//
+// 始终为异步任务设计取消机制
+// 使用原子操作来管理取消标志
+// 实现优雅的资源清理
+// 提供清晰的状态反馈
+// 合理处理取消的传播
+// 优化检查点以平衡响应性和性能
+// 使用结构化日志进行调试
+// 考虑级联效应
+// 正确处理 RAII 资源
+// 实现可测试的取消行为
