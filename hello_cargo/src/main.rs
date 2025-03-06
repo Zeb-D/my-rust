@@ -16,11 +16,6 @@ impl<F: Future> CancellableFuture<F> {
             cancelled: Arc::new(Mutex::new(false)),
         }
     }
-
-    fn cancel(&self) {
-        let mut cancelled = self.cancelled.lock().unwrap();
-        *cancelled = true;
-    }
 }
 
 impl<F: Future> Future for CancellableFuture<F> {
