@@ -1,60 +1,70 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use tokio::time::{sleep, Duration};
+use std::env;
 
-struct CancellableFuture<F> {
-    inner: F,
-    cancelled: Arc<Mutex<bool>>, // 使用 Arc<Mutex> 实现线程安全的取消标志
-}
-
-impl<F: Future> CancellableFuture<F> {
-    fn new(future: F) -> Self {
-        CancellableFuture {
-            inner: future,
-            cancelled: Arc::new(Mutex::new(false)),
-        }
-    }
-}
-
-impl<F: Future> Future for CancellableFuture<F> {
-    type Output = Option<F::Output>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // 检查是否已取消
-        if *self.cancelled.lock().unwrap() {
-            return Poll::Ready(None);
-        }
-
-        // 安全地轮询内部 Future
-        match unsafe { self.as_mut().map_unchecked_mut(|this| &mut this.inner) }.poll(cx) {
-            Poll::Ready(output) => Poll::Ready(Some(output)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
+// cargo run -- increase 10
 #[tokio::main]
 async fn main() {
-    let future = CancellableFuture::new(async {
-        sleep(Duration::from_secs(5)).await;
-        println!("Task completed!");
-        42
-    });
+    let args: Vec<String> = env::args().collect();
+    println!("{:?}", args);
+    match args.len() {
+        // no arguments passed
+        1 => {
+            println!("My name is 'match_args'. Try passing some arguments!");
+        }
+        // one argument passed
+        2 => match args[1].parse() {
+            Ok(42) => println!("This is the answer!"),
+            _ => println!("This is not the answer."),
+        },
+        // one command and one argument passed
+        3 => {
+            let cmd = &args[1];
+            let num = &args[2];
+            // parse the number
+            let number: i32 = match num.parse() {
+                Ok(n) => n,
+                Err(_) => {
+                    eprintln!("error: second argument not an integer");
+                    help();
+                    return;
+                }
+            };
+            // parse the command
+            match &cmd[..] {
+                "increase" => increase(number),
+                "decrease" => decrease(number),
+                _ => {
+                    eprintln!("error: invalid command");
+                    help();
+                }
+            }
+        }
+        // all the other cases
+        4 => {
+            println!("hahaha four")
+        }
 
-    let cancelled = Arc::clone(&future.cancelled); // 克隆 Arc 用于取消操作
-
-    tokio::spawn(async move {
-        sleep(Duration::from_secs(1)).await;
-        let mut cancelled = cancelled.lock().unwrap();
-        *cancelled = true;
-        println!("Task cancelled!");
-    });
-
-    if let Some(result) = future.await {
-        println!("Got result: {}", result);
-    } else {
-        println!("Task was cancelled");
+        // all the other cases
+        _ => {
+            // show a help message
+            help();
+        }
     }
+}
+
+fn increase(number: i32) {
+    println!("111-{}", number + 1);
+}
+
+fn decrease(number: i32) {
+    println!("222={}", number - 1);
+}
+
+fn help() {
+    println!(
+        "usage:
+    match_args <string>
+        Check whether given string is the answer.
+    match_args {{increase|decrease}} <integer>
+        Increase or decrease given integer by one."
+    );
 }
