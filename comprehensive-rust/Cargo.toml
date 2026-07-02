@@ -1,0 +1,8 @@
+# 习题来自：https://google.github.io/comprehensive-rust/index.html
+[package]
+name = "comprehensive-rust"
+version = "0.1.0"
+edition = "2024"
+
+[dev-dependencies]
+libc = "1.0.0-alpha"
