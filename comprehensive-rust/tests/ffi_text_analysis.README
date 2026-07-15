@@ -1,0 +1,96 @@
+它们之间的联系可以概括为：测试代码通过 Rust FFI 绑定 (ffi.rs) 调用编译好的 C 库 (text_analysis.c + text_analysis.h) 中的函数，并传递 Rust 回调函数供 C 库调用。下面是一个完整的数据流和协作关系图。
+
+1. 文件职责总览
+文件	角色	内容
+text_analysis.h	C 头文件	声明 API 函数、结构体（TextAnalyst、Token）、枚举（TAError）以及回调类型（Tokenizer、TokenCallback）。
+text_analysis.c	C 实现	实现头文件中声明的所有函数（ta_new、ta_free、ta_foreach_token 等）。内部使用 Tokenizer 获取 token，对每个 token 调用 TokenCallback。
+src/ffi.rs	Rust FFI 绑定	使用 extern "C" 声明 C 函数，用 #[repr(C)] 映射 C 类型（结构体、枚举、函数指针）。还定义了与 C 匹配的回调类型别名（Tokenizer、TokenCallback）。
+tests/ffi_test.rs	集成测试	使用 ffi.rs 中的声明，调用 C 库；提供 Rust 回调函数（count_tokens），将其转换为 C 期望的函数指针，传给 ta_foreach_token。
+build.rs	编译脚本	编译 c_src/*.c 为静态库，并链接到 Rust 二进制/测试。
+2. 数据流（从测试到 C 库再回到测试）
+text
+[测试代码 (ffi_test.rs)]
+    │
+    │ 调用 ffi::ta_new()
+    ▼
+[Rust FFI (ffi.rs)]
+    │ 声明 extern "C" fn ta_new() -> *mut TextAnalyst
+    │
+    │ 链接到 C 库
+    ▼
+[C 库 (text_analysis.c)]
+    │ 实现 ta_new：分配 TextAnalyst 结构体并返回指针
+    │
+    │ 返回裸指针给 Rust
+    ▼
+[测试代码]
+    │ 使用指针调用 ffi::ta_set_text(...)
+    │
+    │ 构造回调函数 count_tokens (unsafe extern "C")
+    │ 将其包装为 Option 类型，然后取地址（&callback as *const _）
+    │ 传递给 ffi::ta_foreach_token(ta, &callback, ...)
+    ▼
+[Rust FFI] → 转发给 C
+    │ 将回调函数指针的指针传递给 C 函数
+    ▼
+[C 库]
+    │ ta_foreach_token 内部调用默认 tokenizer
+    │ 每找到一个 token，就调用传入的 callback（即 Rust 函数）
+    │ 它会通过函数指针跳转到 Rust 代码
+    ▼
+[Rust 回调函数 (count_tokens)]
+    │ 被 C 调用，接收 Token 结构体指针
+    │ 将 Token 内容转为 &str，打印
+    │ 返回 true 以继续迭代
+    ▼
+[C 库]
+    │ 继续遍历剩余 token，直到结束或回调返回 false
+    │ 最后返回 token 总数给 Rust
+    ▼
+[测试代码]
+    │ 打印总数，释放 TextAnalyst
+3. 关键对应关系
+类型映射：
+
+C 的 TextAnalyst* → Rust 的 *mut ffi::TextAnalyst（不透明结构体）。
+
+C 的 Token → Rust 的 #[repr(C)] struct Token（字段顺序和类型一致）。
+
+C 的 enum TAError → Rust 的 #[repr(C)] enum TAError（值相同）。
+
+C 的 bool (*)(Token*, void*) → Rust 的 unsafe extern "C" fn(*mut Token, *mut c_void) -> bool。
+
+C 的 bool (*)(void*, Token*, void*) → Rust 的 unsafe extern "C" fn(*mut c_void, *mut Token, *mut c_void) -> bool。
+
+回调传递细节：
+
+C 函数 ta_foreach_token 的第二个参数类型是 const TokenCallback*，即指向函数指针的指针。
+
+所以在 Rust 中，我们需要定义一个 Option 类型的变量 callback，取它的地址（&callback as *const _）传给 C。这是因为 C 期望的是函数指针变量的地址（允许为 NULL）。
+
+测试中 let callback: ffi::TokenCallback = Some(count_tokens); 创建了一个函数指针变量（Option 包裹），然后 &callback 得到指向它的指针，符合 C 的声明。
+
+内存管理：
+
+ta_new 在 C 堆上分配 TextAnalyst，ta_free 释放。
+
+ta_set_text 可以选择复制文本（make_copy=true），否则只是持有传入的指针（Rust 必须保证该指针在 C 使用期间有效）。
+
+编译链接：
+
+build.rs 将 text_analysis.c 和 c_init.c 编译为 libtext_analysis.a，并告诉 rustc 链接它。
+
+测试二进制在链接时会找到 C 库中的符号（如 ta_new）。
+
+4. 为什么测试能够编译和运行？
+ffi.rs 提供了声明（签名），没有实现，实现由 C 库提供。
+
+构建时，build.rs 编译 C 代码并生成静态库，rustc 在链接时将这些声明与库中的实现绑定。
+
+测试运行时，C 库被加载（静态链接，代码合并到测试二进制），所有函数可用。
+
+回调函数 count_tokens 编译为符合 C ABI 的函数，其地址可被 C 代码调用。
+
+5. 总结一句话
+测试代码定义回调 → 通过 FFI 绑定调用 C 函数 → C 函数遍历文本并使用回调返回 Rust 函数 → 结果传回测试。
+ffi.rs 是桥梁，build.rs 是粘合剂，*.h 和 *.c 是真正的业务逻辑。
