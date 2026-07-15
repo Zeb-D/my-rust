@@ -1,0 +1,70 @@
+测试代码的调用链路涉及 Rust 测试 → Rust FFI 绑定 → C++ 实现，通过 C API 桥接。下面逐步拆解。
+
+1. 文件作用与职责
+文件	角色
+cpp_src/interner.h	C 语言头文件，声明不透明类型 StringInterner 和 C 函数（interner_new, interner_free, interner_intern, interner_count）。这是 C API 契约，供 Rust 和 C++ 共同遵守。
+cpp_src/interner.hpp	C++ 头文件，定义 StringInterner 类，使用 std::unordered_set<std::string> 实现字符串池。
+cpp_src/internerner.cpp	C++ 实现文件，提供 extern "C" 函数，将 C API 转发给 C++ 类方法。它负责分配/释放 StringInterner 对象。
+src/ffi_interner.rs	Rust FFI 绑定，声明外部 C 函数（unsafe extern "C"）。将 C 类型映射为 Rust 类型（如 StringInternerRaw），提供 pub 函数供其他模块调用。
+src/lib.rs	导出 ffi_interner 模块，使测试能访问 FFI 函数。
+build.rs	编译 c_src/*.c 和 cpp_src/internerner.cpp，打包为静态库 libcombined.a，并链接 C++ 标准库。
+tests/ffi_test.rs	集成测试，使用 ffi_interner 调用字符串池，验证功能。
+2. 调用链路（按执行顺序）
+text
+测试函数 test_ffi_rust_call_c_cpp
+  │
+  ├─ unsafe 块开始
+  │
+  ├─ ffi_interner::interner_new()
+  │    │
+  │    │ (Rust FFI 声明，位于 src/ffi_interner.rs)
+  │    │ pub fn interner_new() -> *mut StringInternerRaw;
+  │    │
+  │    └─> 链接到 C++ 实现的 interner_new 函数 (internerner.cpp)
+  │         └─> return new StringInterner();   // 在堆上创建 C++ 对象
+  │             返回原始指针（不透明）
+  │
+  ├─ CString::new("hello").unwrap() → 转换为 C 字符串（以 '\0' 结尾）
+  │
+  ├─ ffi_interner::interner_intern(interner, s1.as_ptr())
+  │    │
+  │    │ (Rust FFI)
+  │    │ pub fn interner_intern(interner: *mut StringInternerRaw, s: *const c_char) -> *const c_char;
+  │    │
+  │    └─> 链接到 C++ 实现的 interner_intern (internerner.cpp)
+  │         └─> return interner->intern(s);   // 调用 C++ 方法
+  │              ├─ strings.emplace(s) 插入字符串
+  │              └─ 返回指向池中字符串的 const char*
+  │
+  ├─ 类似地调用 interner_intern 处理 s2, s3
+  │
+  ├─ assert_eq!(p1, p3)  // 验证相同字符串返回相同指针
+  ├─ assert_ne!(p1, p2)  // 不同字符串返回不同指针
+  ├─ assert_eq!(ffi_interner::interner_count(interner), 2); // 验证计数
+  │    │
+  │    │ (Rust FFI)
+  │    │ pub fn interner_count(interner: *const StringInternerRaw) -> usize;
+  │    │
+  │    └─> 链接到 C++ 实现的 interner_count
+  │         └─> return interner->count();   // 返回 strings.size()
+  │
+  └─ ffi_interner::interner_free(interner)
+       │
+       │ (Rust FFI)
+       │ pub fn interner_free(interner: *mut StringInternerRaw);
+       │
+       └─> 链接到 C++ 实现的 interner_free
+            └─> delete interner;   // 析构 C++ 对象，释放内存
+3. 关键联系点
+类型匹配：C 的 StringInterner* 与 Rust 的 *mut StringInternerRaw 对应（不透明指针），确保内存布局透明。
+
+函数签名一致：extern "C" 保证 ABI 一致，避免名称修饰（name mangling）。
+
+生命周期管理：Rust 测试负责调用 new/delete 的包装函数，确保对象在合适时机创建和销毁。
+
+内存安全：所有 FFI 调用在 unsafe 块中，因为 Rust 无法验证外部代码的内存安全性。
+
+构建链接：build.rs 将 C++ 对象文件打包为静态库，Rust 通过 extern 声明找到符号。
+
+4. 总结
+这段测试代码通过 Rust FFI 调用了 C++ 实现的字符串池。ffi_interner.rs 提供了类型安全的 Rust 接口，internerner.cpp 作为桥梁将 C API 转发给 C++ 类，build.rs 负责编译和链接，使得整个调用链完整可执行。
