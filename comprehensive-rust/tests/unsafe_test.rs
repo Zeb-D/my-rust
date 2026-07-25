@@ -12,8 +12,8 @@ mod tests {
         use std::pin::Pin;
 
         thread_local! {
-        static BATCH_FOR_PROCESSING: RefCell<Vec<String>> = RefCell::new(Vec::new());
-    }
+            static BATCH_FOR_PROCESSING: RefCell<Vec<String>> = RefCell::new(Vec::new());
+        }
 
         #[derive(Debug)]
         struct CustomString(String);
@@ -818,5 +818,92 @@ mod tests {
 
         let x = numbers.get(10);
         println!("{:?}", x);
+    }
+
+    #[test]
+    fn test_raw_pointer() {
+        // https://google.github.io/comprehensive-rust/unsafe-rust/dereferencing.html
+        let mut x = 10;
+
+        let p1: *mut i32 = &raw mut x;
+        let p2 = p1 as *const i32;
+
+        // SAFETY: p1 and p2 were created by taking raw pointers to a local, so they
+        // are guaranteed to be non-null, aligned, and point into a single (stack-)
+        // allocated object.
+        //
+        // The object underlying the raw pointers lives for the entire function, so
+        // it is not deallocated while the raw pointers still exist. It is not
+        // accessed through references while the raw pointers exist, nor is it
+        // accessed from other threads concurrently.
+        unsafe {
+            dbg!(p1);
+            dbg!(*p1);
+            *p1 = 6;
+            // Mutation may soundly be observed through a raw pointer, like in C.
+            dbg!(*p2);
+        }
+
+        // UNSOUND. DO NOT DO THIS.
+        let r: &i32 = unsafe { &*p1 };
+        dbg!(r);
+        x = 50;
+        dbg!(r); // Object underlying the reference has been mutated. This is UB.
+    }
+
+    #[test]
+    fn test_mutable_static() {
+        static mut COUNTER: u32 = 0;
+
+        fn add_to_counter(inc: u32) {
+            // SAFETY: There are no other threads which could be accessing `COUNTER`.
+            unsafe {
+                COUNTER += inc;
+            }
+        }
+
+        add_to_counter(42);
+
+        // SAFETY: There are no other threads which could be accessing `COUNTER`.
+        unsafe {
+            dbg!(COUNTER);
+        }
+    }
+
+    #[test]
+    fn test_union() {
+        #[repr(C)]
+        union MyUnion {
+            i: u8,
+            b: bool,
+        }
+
+        let u = MyUnion { i: 42 };
+        println!("int: {}", unsafe { u.i });
+        println!("bool: {}", unsafe { u.b }); // Undefined behavior!
+    }
+
+    #[test]
+    fn test_extern_c() {
+        use std::ffi::c_char;
+
+        unsafe extern "C" {
+            // `abs` doesn't deal with pointers and doesn't have any safety requirements.
+            safe fn abs(input: i32) -> i32;
+
+            /// # Safety
+            ///
+            /// `s` must be a pointer to a NUL-terminated C string which is valid and
+            /// not modified for the duration of this function call.
+            unsafe fn strlen(s: *const c_char) -> usize;
+        }
+
+        println!("Absolute value of -3 according to C: {}", abs(-3));
+
+        unsafe {
+            // SAFETY: We pass a pointer to a C string literal which is valid for
+            // the duration of the program.
+            println!("String length: {}", strlen(c"String".as_ptr()));
+        }
     }
 }

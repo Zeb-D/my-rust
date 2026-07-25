@@ -4,6 +4,15 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    // --- rerun-if-changed directives ---
+    println!("cargo:rerun-if-changed=c_src/c_init.c");
+    println!("cargo:rerun-if-changed=c_src/text_analysis.c");
+    println!("cargo:rerun-if-changed=c_src/text_analysis.h");
+    println!("cargo:rerun-if-changed=cpp_src/interner.cpp");
+    println!("cargo:rerun-if-changed=cpp_src/interner.h");
+    println!("cargo:rerun-if-changed=cpp_src/interner.hpp");
+    println!("cargo:rerun-if-changed=build.rs");
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     println!("OUT_DIR = {out_dir:?}");
 
@@ -60,6 +69,10 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     println!("cargo:rustc-link-lib=static=combined");
+
+    // Pass the linker flag directly to ensure it's applied to ALL targets
+    // (including integration tests that declare their own extern "C" functions).
+    println!("cargo:rustc-link-arg=-lcombined");
 
     // 链接 C++ 标准库
     #[cfg(target_os = "macos")]
