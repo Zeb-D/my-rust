@@ -50,7 +50,7 @@ mod tests {
         }
 
         let pinned = SelfRef::new("Rust 🦀");
-        drop(pinned);
+        drop(pinned); // 会触发上面的drop方法，将值放入到BATCH_FOR_PROCESSING中
 
         BATCH_FOR_PROCESSING.with(|batch| {
             println!("Batch: {:?}", batch.borrow());
