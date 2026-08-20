@@ -1,0 +1,17 @@
+[package]
+name = "jemallocator-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+jemallocator = "0.5.4"
+criterion = "0.4"
+
+[[bench]]
+#name = "main_bench"
+name = "my_benchmark"
+harness = false
+# 单位：秒
+warm-up-time = 5
+measurement-time = 10  # 秒/测试
+nresamples = 100000    # 统计重采样次数
